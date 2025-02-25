@@ -20,41 +20,46 @@ async def broadcast(message):
 
 async def start_game():
     global current_question, game_active
-    if len(players) >= 3 and not game_active:
-        game_active = True
-        while game_active:
-            current_question = random.choice(questions)
-            await broadcast({
-                "type": "question",
-                "question": current_question["q"],
-                "options": current_question["options"]
-            })
-            await asyncio.sleep(10)  # 10 seconds to answer
-            current_question = None
-            await broadcast({"type": "timeout"})
-            await asyncio.sleep(2)  # Short break
+    game_active = True  # Start immediately, no player minimum
+    while game_active:
+        current_question = random.choice(questions)
+        print(f"Broadcasting question: {current_question['q']}")  # Debug
+        await broadcast({
+            "type": "question",
+            "question": current_question["q"],
+            "options": current_question["options"]
+        })
+        await asyncio.sleep(10)  # 10 seconds to answer
+        current_question = None
+        await broadcast({"type": "timeout"})
+        await asyncio.sleep(2)  # Short break
 
 async def handle_client(websocket):
     clients.add(websocket)
     try:
         # Handle join
         username_msg = await websocket.recv()
+        print(f"Received: {username_msg}")  # Debug
         data = json.loads(username_msg)
         if data["type"] == "join" and "username" in data:
             username = data["username"]
             players[websocket] = {"username": username, "score": 0}
+            print(f"Player joined: {username}")  # Debug
             await broadcast({
                 "type": "update",
                 "players": {p["username"]: p["score"] for ws, p in players.items()}
             })
+            # Start game if not already running
             if not game_active:
                 asyncio.create_task(start_game())
         else:
+            print("Invalid join message, closing connection")
             await websocket.close()
             return
 
         # Game loop
         async for message in websocket:
+            print(f"Message from {players[websocket]['username']}: {message}")  # Debug
             data = json.loads(message)
             if data["type"] == "answer" and current_question:
                 answer = data["answer"]
@@ -68,10 +73,11 @@ async def handle_client(websocket):
                         "type": "update",
                         "players": {p["username"]: p["score"] for ws, p in players.items()}
                     })
-    except:
-        pass
+    except Exception as e:
+        print(f"Client error: {e}")  # Log the exception
     finally:
         if websocket in players:
+            print(f"Player {players[websocket]['username']} disconnected")  # Debug
             del players[websocket]
             clients.remove(websocket)
             await broadcast({
